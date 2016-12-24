@@ -3,6 +3,9 @@ from scipy import misc
 import matplotlib.pyplot as plt
 import numpy as np
 import operator
+import cv2
+
+from scipy.interpolate import *
 
 image_path = "licorne.png"
 i = misc.imread(image_path)
@@ -29,7 +32,7 @@ i[x1:x2, y1:y2, 3] = 0
 
 plt.imshow(i)
 plt.axis('off')
-plt.show()
+plt.draw()
 
 
 def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
@@ -65,7 +68,7 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
 
         # initialisation de Cp
         print ">> Initialisation de C(p)"
-        C = np.zeros((nl, nc)) + 1
+        C = np.ones((nl, nc))
         C[pix1[0]:pix1[1], pix2[0]:pix2[1]] = 0
 
         cpt = 0
@@ -76,6 +79,12 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
             # Compute prioreties
             print ">> Calcul des P(p)"
             P = {}
+
+            # We start by creating a mask : on met 1 dans le contour du trou t 0 au reste
+            mask = np.zeros((image.shape[0], image.shape[1]))
+            for p in delta_gamma_t:
+                mask[p] = 1
+
             for p in delta_gamma_t:
                 # P(p) = C(p) * D(p)
 
@@ -85,11 +94,41 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
                     for y in range(p[1]-milieu, p[1]+milieu):
                         if (x,y) not in gamma_t:
                             somme = somme + C[x][y]
-                P[p] = somme/patch_area
 
-                # Calculer D(p) ...
+                C[p[0], p[1]] = somme/patch_area
+                P[p] = C[p[0], p[1]]
+
+                print P
+
+                ## Calculer D(p) ...
+                # On commence par calculer le gradient(en utilisant le filtre sobel)
+                sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
+                sobely = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
+                # On calcule de l'angle
+                angle = cv2.phase(sobelx, sobely)
+
+                # On fait une interpolation du contour pour pouvoir calculer la normale
+                # delta_sorted = sorted(delta_gamma_t, key=lambda x: x[0])
+                # interpolator = KroghInterpolator([x[0] for x in delta_sorted], [x[1] for x in delta_sorted])
+                # derivate_interp = misc.derivative(interpolator, p[0])
+                # # Calcul du vecteur unitaire normale
+                # # tangente en un pt : y = f(a) +f'(a)(x-a)
+                # yt = p[1] +derivate_interp
+                # vector_tanget = (1,yt-p[1])  #p0+1-p0
+                # n = (-vector_tanget[1], vector_tanget[0])
+                # print n
+                # P[p] += abs(sobelx[p[0], p[1],0] * n[0] +  sobely[p[0], p[1],0] * n[1])
+
+                # On calcule maintenant le gradient du masque. Cela va nous permettre d'avoir le vecteur unitaire de la normal
+                grad = np.gradient(mask)
+                gradx, grady = grad[0], grad[1]
+                print gradx.shape
+                print gradx[p], " ", grady[p]
+
+
 
             # Chercher le patch ayant le plus grand Pp
+            print P
             max_patch_center = max(P.iteritems(), key=operator.itemgetter(1))[0]
             print ">> Patch au plus grand P(p) calculé..."
 
@@ -182,13 +221,14 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
                 delta_gamma_t.append((y,min_x))
 
             print ">> MAJ des nouveaux contours du trou effectuée..."
+            print delta_gamma_t
             print "\n"
     else:
         raise Exception('Patch_size doit etre impair.')
 
     return image
 
-
+print "Début"
 new_image = region_filling_algorithm(image = i, pix1 = [x1, y1], pix2 = [x2, y2], patch_size= 5, alpha = 255)
 print "FIN!!!"
 plt.imshow(new_image)
