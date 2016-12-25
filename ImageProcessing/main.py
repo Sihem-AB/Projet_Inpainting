@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 from scipy import misc
+from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 import numpy as np
 import operator
-import cv2
-
+import matplotlib.image as mpimg
+from matplotlib import colors
+from skimage import io, color
 from scipy.interpolate import *
 
+import numba
+
+# image_path = "lena.gif"
+# image_path = "Wikipedia.png"
 image_path = "licorne.png"
-i = misc.imread(image_path)
+# image_path = "Kaniza_triangle.jpg"
+i = mpimg.imread(image_path)
 # plt.imshow(i)
 # plt.axis('off')
 # plt.show()
@@ -18,11 +25,9 @@ x1 = 50
 x2 = 75
 y1 = 80
 y2 = 115
-i[x1:x2, y1:y2, 0] = 0
-i[x1:x2, y1:y2, 1] = 0
-i[x1:x2, y1:y2, 2] = 0
-i[x1:x2, y1:y2, 3] = 0
 
+for channel in range(i.shape[2]):
+    i[x1:x2, y1:y2, channel] = 0.5
 
 # print "contenu du pixel 120 120: channel 0 -> ",i[120, 120, 0]
 # print "contenu du pixel 120 120: channel 1 -> ",i[120, 120, 1]
@@ -34,14 +39,46 @@ plt.imshow(i)
 plt.axis('off')
 plt.draw()
 
+def retourne_contour(mask):
+    # On va convoluer avec un masque laplacien pour detecter le contour
+    masque_laplacien = np.array([[1,1,1], [1,-8,1], [1, 1, 1]])
+    after_laplac = convolve2d(mask, masque_laplacien, 'same')
+    return [tuple(x) for x in list(np.transpose(after_laplac.nonzero()))]
+
+@numba.jit
+def find_best_patch(image, max_patch_center, milieu, mask,nl,nc,cc):
+    xp,yp = max_patch_center
+    exempl_patch = {}
+    for x in range(milieu, nl - milieu):
+        for y in range(milieu, nc - milieu):
+            if mask[(x, y)] == 0:  # n'appartient pas au troue
+                mask_and = ~mask[x-milieu:x+milieu+1,y-milieu:y+milieu+1].astype(bool) & ~mask[xp-milieu:xp+milieu+1,yp-milieu:yp+milieu+1].astype(bool)
+                if mask_and.any():
+                    diff = image[x-milieu:x+milieu+1,y-milieu:y+milieu+1, :] - image[xp-milieu:xp+milieu+1,yp-milieu:yp+milieu+1, :]
+                    exempl_patch[(x,y)] = np.sum(np.power(diff[mask_and],2))
+
+                    # Trouver l'exemplaire dans la region qui n'est pas le trou, qui minimise la distance entre les deux patchs
+    print "Recherche du minimale ..."
+    print min(exempl_patch.iteritems(), key=operator.itemgetter(1))
+    return min(exempl_patch.iteritems(), key=operator.itemgetter(1))[0]
+
+
+
 
 def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
 
-    if patch_size%2 != 0:
+    if patch_size%2 == 0:
         print ">> Debut..."
-        nl, nc, cc = image.shape
+        nl, nc = image.shape[0], image.shape[1]
+
+        cc = np.clip(image.shape[2], 1, 3)
+
+        # cc = 1
+        # if len(image.shape) == 3:
+        #     cc = 3
+
         patch_area = patch_size*patch_size
-        milieu = (patch_size - 1) / 2
+        milieu = (patch_size) / 2
 
 
 
@@ -56,74 +93,138 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
         # Initialisation des pixels contours, garder les coordonnees des pixels
         print ">> Initialisation des contours"
         delta_gamma_t = []
-        for x in range(pix1[0], pix2[0]):
+        for x in range(pix1[0], pix2[0]+1):
                 delta_gamma_t.append((x,pix1[1]))
-        for x in range(pix1[0], pix2[0]):
+        for x in range(pix1[0], pix2[0]+1):
                 delta_gamma_t.append((x,pix2[1]))
-        for y in range(pix1[1]+1, pix2[1]-1):
+        for y in range(pix1[1], pix2[1]+1):
                 delta_gamma_t.append((pix1[0],y))
-        for y in range(pix1[1]+1, pix2[1]-1):
+        for y in range(pix1[1], pix2[1]+1):
                 delta_gamma_t.append((pix2[0],y))
 
 
         # initialisation de Cp
         print ">> Initialisation de C(p)"
         C = np.ones((nl, nc))
-        C[pix1[0]:pix1[1], pix2[0]:pix2[1]] = 0
+        C[pix1[0]:pix2[0]+1, pix1[1]:pix2[1]+1] = 0
+
+        D = np.zeros((nl,nc))
+
+        # We start by creating a mask : on met 1 dans le contour du trou t 0 au reste
+        mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float)
+        mask[pix1[0]:pix2[0], pix1[1]:pix2[1]] = 1
 
         cpt = 0
         #while(len(delta_gamma_t)!=0):
-        while(cpt < 20):
+        plt.ion()
+        while(len(delta_gamma_t) > 0):
             print ">> Debut du while..., len(delta_gamma_t) = ", len(delta_gamma_t)
             cpt = cpt + 1
             # Compute prioreties
             print ">> Calcul des P(p)"
             P = {}
 
-            # We start by creating a mask : on met 1 dans le contour du trou t 0 au reste
-            mask = np.zeros((image.shape[0], image.shape[1]))
-            for p in delta_gamma_t:
-                mask[p] = 1
+
+
+            # On calcule maintenant le gradient du masque. Cela va nous permettre d'avoir le vecteur unitaire de la normal
+            grad_mask = np.gradient(mask)
+            grad_maskx, grad_masky = grad_mask[0], grad_mask[1]
+
+            # normalisation du gradient
+            grad_maskx, grad_masky = grad_maskx / np.max(grad_maskx), grad_masky / np.max(grad_masky)
+
+            # On calcule le gradientde l'image (cela va servir pour le calcul de D(p))
+            gradx = np.zeros((image.shape[:2]))
+            grady = gradx
+            for channel in range(cc):
+                grad_isophote = np.gradient(image[:, :, channel])
+                gradx += grad_isophote[0]
+                grady += grad_isophote[1]
+            gradx /= 3
+            grady /= 3
+
+            # gradx /= np.max(gradx)
+            # grady /= np.max(grady)
+
+            # On fait une rotation de 90 degré du gradient pour que le gradient suivant le contour(sinon il est perpendiculaire au contour)
+            tmp = gradx
+            gradx = -grady
+            grady = tmp
+
+            plt.figure(1)
+            plt.imshow(mask, cmap='gray')
+            plt.axis('off')
+            plt.title("mask")
+            #
+            # plt.figure()
+            # plt.imshow(grad_maskx, cmap='gray')
+            # plt.axis('off')
+            # plt.title("grad_maskx")
+            #
+            # plt.figure()
+            # plt.imshow(grad_masky, cmap='gray')
+            # plt.axis('off')
+            # plt.title("grad_masky")
+
+            print "shape : ", image.shape
+
+            plt.figure(0)
+            plt.imshow(image)
+            plt.axis("off")
+            plt.title("image")
+            plt.show()
+
+            plt.figure(2)
+            plt.imshow(C)
+            plt.axis("off")
+            plt.title("C")
+            plt.show()
+
+            plt.figure(3)
+            plt.imshow(D+np.average(image, axis=2))
+            plt.axis("off")
+            plt.title("D")
+            plt.show()
+
+            # plt.figure(4)
+            # plt.imshow(gradx, cmap='gray')
+            # plt.axis("off")
+            # plt.title("gradx")
+            # plt.show()
+            #
+            # plt.figure(5)
+            # plt.imshow(grady, cmap='gray')
+            # plt.axis("off")
+            # plt.title("grady")
+            # plt.show()
+
+
+            plt.pause(0.001)
 
             for p in delta_gamma_t:
                 # P(p) = C(p) * D(p)
 
                 # C(p) la somme des C(q) pour tout q qui appartient au patch mais pas au trou
-                somme = 0
-                for x in range(p[0]-milieu, p[0]+milieu):
-                    for y in range(p[1]-milieu, p[1]+milieu):
-                        if (x,y) not in gamma_t:
-                            somme = somme + C[x][y]
-
-                C[p[0], p[1]] = somme/patch_area
-                P[p] = C[p[0], p[1]]
-
-                print P
+                # somme = 0
+                # min_x, max_x = max(p[0]-milieu, 0), min(p[0]+milieu, nl)
+                # min_y, max_y = max(p[1] - milieu, 0), min(p[1] + milieu, nc)
+                # for x in range(min_x, max_x):
+                #     for y in range(min_y, max_y):
+                #         if mask[(x,y)] == 0: # dans le troue
+                #             somme = somme + C[x][y]
+                #
+                # C[p] = somme/((max_x-min_x) * (max_y-min_y))
+                P[p] = C[p]
 
                 ## Calculer D(p) ...
-                # On commence par calculer le gradient(en utilisant le filtre sobel)
-                sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
-                sobely = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
-                # On calcule de l'angle
-                angle = cv2.phase(sobelx, sobely)
 
-                # On fait une interpolation du contour pour pouvoir calculer la normale
-                # delta_sorted = sorted(delta_gamma_t, key=lambda x: x[0])
-                # interpolator = KroghInterpolator([x[0] for x in delta_sorted], [x[1] for x in delta_sorted])
-                # derivate_interp = misc.derivative(interpolator, p[0])
-                # # Calcul du vecteur unitaire normale
-                # # tangente en un pt : y = f(a) +f'(a)(x-a)
-                # yt = p[1] +derivate_interp
-                # vector_tanget = (1,yt-p[1])  #p0+1-p0
-                # n = (-vector_tanget[1], vector_tanget[0])
-                # print n
-                # P[p] += abs(sobelx[p[0], p[1],0] * n[0] +  sobely[p[0], p[1],0] * n[1])
+                # print grad_maskx[p], " ", grad_masky[p]
+                N = np.array([grad_maskx[p], grad_masky[p]])
+                isophote = np.array([gradx[p], grady[p]])
+                D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha
+                P[p] *= abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha
 
-                # On calcule maintenant le gradient du masque. Cela va nous permettre d'avoir le vecteur unitaire de la normal
-                grad = np.gradient(mask)
-                gradx, grady = grad[0], grad[1]
-                print gradx.shape
-                print gradx[p], " ", grady[p]
+                print "C[p] : ", C[p], " D[p] : ", D[p], "N : ", N
 
 
 
@@ -132,93 +233,60 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
             max_patch_center = max(P.iteritems(), key=operator.itemgetter(1))[0]
             print ">> Patch au plus grand P(p) calculé..."
 
-
-            # Trouver l'exemplaire dans la region qui n'est pas le trou, qui minimise la distance entre les deux patchs
-            max_patch_pixels = [] #les pixels dans le patch qui n'appartiennent pas au trou!
-            for x in range(max_patch_center[0]-milieu, max_patch_center[0]+milieu):
-                row = []
-                for y in range(max_patch_center[1]-milieu, max_patch_center[1]+milieu):
-                    if (x,y) not in gamma_t:
-                        row.append(1)
-                    else:
-                        row.append(0)
-                max_patch_pixels.append(row)
-
-            exempl_patch = {}
-            for x in range(milieu, nl-milieu):
-                for y in range(milieu, nc-milieu):
-                    if (x,y) not in gamma_t and x%patch_size==0 and y%patch_size==0:
-                        moy = []
-                        for i in range(0,milieu):
-                            for j in range(0, milieu):
-                                if max_patch_pixels[i][j] == 1:
-                                    dist = 0
-                                    for channel in range(3):
-                                        dist = dist + (image[x-i, y-j, channel] - image[max_patch_center[0]-i, max_patch_center[1]-j, channel])^2
-                                        dist = dist + (image[x + i, y + j, channel] - image[max_patch_center[0] + i , max_patch_center[1] + j, channel]) ^ 2
-                                        dist = dist + (image[x + i, y - j, channel] - image[max_patch_center[0] + i, max_patch_center[1] - j, channel]) ^ 2
-                                        dist = dist + (image[x - i, y + j, channel] - image[max_patch_center[0] - i, max_patch_center[1] + j, channel]) ^ 2
-                                        moy.append(dist)
-                        exempl_patch[(x,y)] = sum(moy)/len(moy)
-
-            min_exempl_center = max(exempl_patch.iteritems(), key=operator.itemgetter(1))[0]
-
+            min_exempl_center = find_best_patch(image, max_patch_center, milieu, mask, nl, nc, cc)
             print ">> exemple de distance minimale calculé..."
 
-            # copier les pixels de l'exemplaire sur le patch du trou
-            for i in range(0, milieu):
-                for j in range(0, milieu):
-                    image[max_patch_center[0] - i , max_patch_center[1] - j] = image[min_exempl_center[0] - i , min_exempl_center[1] - j]
-                    image[max_patch_center[0] - i , max_patch_center[1] + j] = image[min_exempl_center[0] - i , min_exempl_center[1] + j]
-                    image[max_patch_center[0] + i , max_patch_center[1] + j] = image[min_exempl_center[0] + i , min_exempl_center[1] + j]
-                    image[max_patch_center[0] + i , max_patch_center[1] - j] = image[min_exempl_center[0] + i , min_exempl_center[1] - j]
+            # On met à jour le masque
+            xp,yp = max_patch_center
+            print "xp, yp : ", max_patch_center
+            xq,yq = min_exempl_center
+            print "xq, yq :", min_exempl_center, " mask : ", mask[min_exempl_center]
+
+            plt.figure(6)
+            plt.imshow(image[xp - milieu:xp + milieu, yp - milieu:yp + milieu])
+            plt.axis("off")
+            plt.title("meilleur patch a remplir")
+            plt.show()
+
+            plt.figure(7)
+            plt.imshow(image[xq - milieu:xq + milieu, yq - milieu:yq + milieu])
+            plt.axis("off")
+            plt.title("meilleur aptche trouvee")
+            plt.show()
+
+            plt.pause(0.001)
+
+            # On met à jour le masque
+            for i in range(-milieu, milieu+1):
+                for j in range(-milieu, milieu+1):
+                    if mask[(xp+i, yp+j)] == 1:
+                        mask[(xp + i, yp + j)] = mask[(xq+i, yq+j)].copy()
+                        image[xp + i, yp + j,:] = image[xq+i, yq+j,:].copy()
+
+            # mask[xp-milieu:xp+milieu, yp-milieu:yp+milieu] = mask[xq-milieu:xq+milieu, yq-milieu:yq+milieu].copy()
+
             print ">> pixels copiés dans le trou..."
             # Update C(p) pour tous les pixels appartenant au patch actuel et le trou
 
-            for p in max_patch_pixels:
-                if p in gamma_t:
-                    somme = 0
-                    for x in range(p[0] - milieu, p[0] + milieu):
-                        for y in range(p[1] - milieu, p[1] + milieu):
-                            if (x, y) not in gamma_t:
-                                somme = somme + C[x][y]
-                    C[x][y] = somme / patch_area
-            print ">> MAJ de C(p) effectuée..."
-        # update gamma_t: enlever les pixels qui n'appartiennent plus au trou de gamma_t
-            new_gamma_t = []
-            for p in gamma_t:
-                if p not in max_patch_pixels:
-                    new_gamma_t.append(p)
+            delta_gamma_t = retourne_contour(mask)
+            delta_gamma_t = [x for x in delta_gamma_t if mask[x]==1]
 
-            gamma_t = new_gamma_t
+
+            for x in range(xp-milieu, xp+milieu+1):
+                for y in range(yp-milieu, yp+milieu+1):
+                    if mask[(x,y)] == 1:
+                        C[x,y] = 0
+                        for i in range(x - milieu, x + milieu+1):
+                            for j in range(y - milieu, y + milieu+1):
+                                if mask[i,j] == 0:
+                                    C[x,y] += C[i,j]
+                        C[x,y] /= patch_area
+
+
+
+            print ">> MAJ de C(p) effectuée..."
 
             print ">> MAJ du trou effectuée..."
-        # update delta_gamma_t: identifier les nouveaux contours
-            delta_gamma_t = []
-            dict_x = {}
-            dict_y = {}
-            for p in gamma_t:
-                if p[0] in dict_x:
-                    dict_x[p[0]].append(p[1])
-                else:
-                    dict_x[p[0]] = [p[1]]
-
-                if p[1] in dict_y:
-                    dict_y[p[1]].append(p[0])
-                else:
-                    dict_y[p[1]] = [p[0]]
-
-            for x in dict_x:
-                max_y = max(dict_x[x])
-                min_y = min(dict_x[x])
-                delta_gamma_t.append((x,max_y))
-                delta_gamma_t.append((x,min_y))
-
-            for y in dict_y:
-                max_x = max(dict_y[y])
-                min_x = min(dict_y[y])
-                delta_gamma_t.append((y,max_x))
-                delta_gamma_t.append((y,min_x))
 
             print ">> MAJ des nouveaux contours du trou effectuée..."
             print delta_gamma_t
@@ -228,9 +296,12 @@ def region_filling_algorithm(image, pix1, pix2,patch_size, alpha):
 
     return image
 
-print "Début"
-new_image = region_filling_algorithm(image = i, pix1 = [x1, y1], pix2 = [x2, y2], patch_size= 5, alpha = 255)
+# im = color.rgb2grey(i[:,:,:3])[:,:].reshape((i.shape[0], i.shape[1], 1))
+im = i
+
+new_image = region_filling_algorithm(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=14, alpha = np.max(i))
 print "FIN!!!"
 plt.imshow(new_image)
 plt.axis('off')
 plt.show()
+plt.pause(1000)
