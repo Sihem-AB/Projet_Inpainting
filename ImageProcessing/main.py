@@ -38,8 +38,10 @@ fig = plt.figure()
 ax = fig.add_subplot(111)
 
 # filename="plage.jpg"
-filename = "licorne.png"
+# filename = "licorne.png"
 # filename = "ile.jpg"
+# filename = "paysage_homme.jpg"
+filename = "chaise.png"
 i = mpimg.imread(filename)
 
 arr = np.asarray(i)
@@ -76,7 +78,7 @@ plt.draw()
 
 im = i
 
-inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=9, alpha = np.max(i))
+inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=21, alpha = np.max(i))
 new_image = inpainting.region_filling_algorithm()
 
 print "FIN!!!"

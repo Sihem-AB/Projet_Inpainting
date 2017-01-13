@@ -10,6 +10,8 @@ from matplotlib import colors
 from skimage import io, color
 from scipy.interpolate import *
 import numba
+import random
+import copy
 
 class Inpainting():
     def __init__(self, image, pix1, pix2,patch_size, alpha):
@@ -29,13 +31,13 @@ class Inpainting():
     """
     def normal_contour(self, contour, mask):
         # We put line of the contour in black, otherwise it's white
-        mask_countour = np.ones(mask.shape)
-        for p in contour:
-            mask_countour[p] = 0
-
-        mask_countour = ndimage.gaussian_filter(mask_countour, sigma=1, order=0)
-
-        grad_mask = np.gradient(mask_countour)
+        # mask_countour = np.ones(mask.shape)
+        # for p in contour:
+        #     mask_countour[p] = 0
+        #
+        # mask_countour = ndimage.gaussian_filter(mask_countour, sigma=1, order=0)
+        #
+        grad_mask = np.gradient(mask)
         grad_maskx, grad_masky = grad_mask[0], grad_mask[1]
 
         # normalisation du gradient
@@ -78,11 +80,20 @@ class Inpainting():
                                    - image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,c].astype(float)
                             somme += np.sum(diff[mask_and] * diff[mask_and])
                         exempl_patch[(x, y)] = somme / float(np.sum(mask_and))
-
+                        # exempl_patch[(x,y)] = somme
 
                         # Trouver l'exemplaire dans la region qui n'est pas le trou, qui minimise la distance entre les deux patchs
         print "Recherche du minimale ..."
-        print min(exempl_patch.iteritems(), key=operator.itemgetter(1))
+        # exemplar_sorted = sorted(exempl_patch.iteritems(), key=operator.itemgetter(1))
+        # cpt = 0
+        # for i in range(1,len(exemplar_sorted)):
+        #     if exemplar_sorted[i][1] != exemplar_sorted[i-1][1]:
+        #         break
+        #     cpt += 1
+        #
+        # best_exemplar = random.randint(0, cpt)
+        # # print min(exempl_patch.iteritems(), key=operator.itemgetter(1))
+        # return exemplar_sorted[best_exemplar][0]
         return min(exempl_patch.iteritems(), key=operator.itemgetter(1))[0]
 
 
@@ -152,17 +163,18 @@ class Inpainting():
                 grad_maskx, grad_masky = self.normal_contour(delta_gamma_t, mask)
 
                 # On calcule le gradient de l'image (cela va servir pour le calcul de D(p))
+                image_smooth = ndimage.gaussian_filter(image, sigma=0.1, order=0)
                 gradx = np.zeros((image.shape[:2]))
                 grady = gradx
                 for channel in range(cc):
-                    grad_isophote = np.gradient(image[:, :, channel])
+                    grad_isophote = np.gradient(image_smooth[:, :, channel])
                     gradx += grad_isophote[0]
                     grady += grad_isophote[1]
                 gradx /= cc
                 grady /= cc
 
-                # gradx /= np.max(gradx)
-                # grady /= np.max(grady)
+                gradx /= np.max(gradx)
+                grady /= np.max(grady)
 
                 # We make a rotation of 90 degree of the gradient because othewise the gradient is perpendicular to the contour
                 tmp = gradx
@@ -221,12 +233,12 @@ class Inpainting():
 
                 for p in delta_gamma_t:
                     # calcul de C[p]
-                    C[p] = 0
-                    for x in range(p[0] - milieu, p[0] + milieu + 1):
-                        for y in range(p[1] - milieu, p[1] + milieu + 1):
-                            if mask[(x, y)] == 0:
-                                C[p] += C[(x,y)]
-                    C[p] /= patch_area
+                    # C[p] = 0
+                    # for x in range(p[0] - milieu, p[0] + milieu + 1):
+                    #     for y in range(p[1] - milieu, p[1] + milieu + 1):
+                    #         if mask[(x, y)] == 0:
+                    #             C[p] += C[(x,y)]
+                    # C[p] /= patch_area
 
 
                     P[p] = C[p]
@@ -276,8 +288,8 @@ class Inpainting():
                 for i in range(-milieu, milieu+1):
                     for j in range(-milieu, milieu+1):
                         if mask[(xp+i, yp+j)] == 1:
-                            mask[(xp + i, yp + j)] = mask[(xq+i, yq+j)].copy()
-                            image[xp + i, yp + j,:] = image[xq+i, yq+j,:].copy()
+                            mask[(xp + i, yp + j)] = copy.deepcopy(mask[(xq+i, yq+j)])
+                            image[xp + i, yp + j,:] = copy.deepcopy(image[xq+i, yq+j,:])
 
                 print ">> Pixels copied inside the hole"
 
