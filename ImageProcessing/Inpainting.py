@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.widgets as widgets
 from scipy import misc
 from scipy.signal import convolve2d
+import scipy.ndimage as ndimage
 import operator
 import matplotlib.image as mpimg
 from matplotlib import colors
@@ -31,6 +32,8 @@ class Inpainting():
         mask_countour = np.ones(mask.shape)
         for p in contour:
             mask_countour[p] = 0
+
+        mask_countour = ndimage.gaussian_filter(mask_countour, sigma=1, order=0)
 
         grad_mask = np.gradient(mask_countour)
         grad_maskx, grad_masky = grad_mask[0], grad_mask[1]
