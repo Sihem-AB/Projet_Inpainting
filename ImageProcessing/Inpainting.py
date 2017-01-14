@@ -228,7 +228,7 @@ class Inpainting():
                 print "shape : ", image.shape
 
                 plt.figure(0)
-                plt.imshow(image)
+                plt.imshow(color.lab2rgb(image))
                 plt.axis("off")
                 plt.title("image")
                 plt.show()
@@ -275,8 +275,9 @@ class Inpainting():
                     ## Calculer D(p) ...
                     N = np.array([grad_maskx[p], grad_masky[p]])
                     # On choisit la valeur du plus grand gradient dans le patch
-                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1])
-                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1])
+                    mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1].astype(bool)
+                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * ~mask_patch)
+                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * ~mask_patch)
                     isophote = np.array([gradx_p, grady_p])
                     D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha +0.001
                     P[p] *= D[p]

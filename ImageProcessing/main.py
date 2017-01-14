@@ -41,8 +41,10 @@ ax = fig.add_subplot(111)
 # filename = "licorne.png"
 # filename = "ile.jpg"
 # filename = "paysage_homme.jpg"
-# filename = "chaise.png"
-filename = "orange.jpg"
+filename = "chaise.png"
+# filename = "orange.jpg"
+# filename = "moto.jpg"
+# filename = "livre.jpg"
 i = mpimg.imread(filename)
 
 arr = np.asarray(i)
@@ -77,13 +79,13 @@ plt.draw()
 
 # im = color.rgb2grey(i[:,:,:3])[:,:].reshape((i.shape[0], i.shape[1], 1))
 
-im = i
-
-inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=9, alpha = np.max(i))
+# im = i
+im = color.rgb2lab(i[:,:,:3])
+inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=15, alpha = np.max(i))
 new_image = inpainting.region_filling_algorithm()
 
 print "FIN!!!"
-plt.imshow(new_image)
+plt.imshow(color.lab2rgb(new_image))
 plt.axis('off')
 plt.show()
 plt.pause(1000)
