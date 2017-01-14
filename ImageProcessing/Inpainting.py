@@ -11,7 +11,13 @@ from skimage import io, color
 from scipy.interpolate import *
 import numba
 import random
+from numpy.lib.stride_tricks import as_strided
 import copy
+
+import pyximport
+pyximport.install()
+
+# from fastSSD import *
 
 class Inpainting():
     def __init__(self, image, pix1, pix2,patch_size, alpha):
@@ -59,6 +65,8 @@ class Inpainting():
 
         contour = [x for x in contour if mask[x] == 1]
 
+
+
         if not contour: #If the laplacien doesnt detect any contour, it can always remain some piwels who have not been filled yet
             contour = [tuple(x) for x in list(np.transpose(mask.nonzero()))]
 
@@ -68,19 +76,40 @@ class Inpainting():
     # @numba.jit
     def find_best_patch(self, image, max_patch_center, milieu, mask,nl,nc,cc):
         xp,yp = max_patch_center
+
+        patch = image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,:].astype(float)
+
+        # y = as_strided(image,
+        #                shape=(image.shape[0] - milieu + 1,
+        #                       image.shape[1] - milieu + 1,cc) +
+        #                      (milieu, milieu),
+        #                strides=image.strides * 2)
+        #
+        # mask_and = ~mask.astype(bool) & ~mask.astype(bool)
+        #
+
+        # Compute the sum of squared differences using broadcasting.
+        # ssd = ((y - patch) ** 2 * mask_and).sum(axis=-1).sum(axis=-1)
+
         exempl_patch = {}
-        for x in range(milieu, nl - milieu):
-            for y in range(milieu, nc - milieu):
+        voisinage_x = image.shape[0] / 2
+        voisinage_y = image.shape[1] /2
+
+        print "voisinage_x : ", voisinage_x
+
+        xmin,xmax = max(xp - voisinage_x, milieu), min(xp+voisinage_x, nl - milieu)
+        ymin, ymax = max(yp - voisinage_y, milieu), min(yp + voisinage_y, nc - milieu)
+        for x in range(xmin, xmax):
+            for y in range(ymin, ymax):
                 if mask[(x, y)] == 0:  # n'appartient pas au troue
                     mask_and = ~mask[x-milieu:x+milieu+1,y-milieu:y+milieu+1].astype(bool) & ~mask[xp-milieu:xp+milieu+1,yp-milieu:yp+milieu+1].astype(bool)
                     if mask_and.any():  # Si les deux patchs ont au moins un pixel en commun qui n'appartient pas au toroue
                         somme = 0.0
                         for c in range(cc):
                             diff = image[x - milieu:x + milieu + 1, y - milieu:y + milieu + 1, c].astype(float) \
-                                   - image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,c].astype(float)
+                                   - patch[:,:,c]
                             somme += np.sum(diff[mask_and] * diff[mask_and])
-                        exempl_patch[(x, y)] = somme / float(np.sum(mask_and))
-                        # exempl_patch[(x,y)] = somme
+                        exempl_patch[(x,y)] = somme / float(np.sum(mask_and))
 
                         # Trouver l'exemplaire dans la region qui n'est pas le trou, qui minimise la distance entre les deux patchs
         print "Recherche du minimale ..."
@@ -229,19 +258,19 @@ class Inpainting():
                 plt.show()
 
 
-                plt.pause(0.001)
+                plt.pause(0.0000001)
 
                 for p in delta_gamma_t:
                     # calcul de C[p]
-                    # C[p] = 0
-                    # for x in range(p[0] - milieu, p[0] + milieu + 1):
-                    #     for y in range(p[1] - milieu, p[1] + milieu + 1):
-                    #         if mask[(x, y)] == 0:
-                    #             C[p] += C[(x,y)]
-                    # C[p] /= patch_area
+                    Cp = 0
+                    for x in range(p[0] - milieu, p[0] + milieu + 1):
+                        for y in range(p[1] - milieu, p[1] + milieu + 1):
+                            if mask[(x, y)] == 0:
+                                Cp += C[(x,y)]
+                    Cp /= patch_area
 
 
-                    P[p] = C[p]
+                    P[p] = Cp
 
                     ## Calculer D(p) ...
                     N = np.array([grad_maskx[p], grad_masky[p]])
