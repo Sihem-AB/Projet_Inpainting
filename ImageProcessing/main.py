@@ -62,10 +62,10 @@ plt.show()
 # plt.show()
 
 # Definir le trou initiale (delta omega 0) sense etre selectionne par le user
-x1 = cadrant[1]
-y1 = cadrant[0]
-x2 = cadrant[3]
-y2 = cadrant[2]
+x1 = cadrant[-3]
+y1 = cadrant[-4]
+x2 = cadrant[-1]
+y2 = cadrant[-2]
 
 print x1, " ", y1, " ", x2, " ", y2
 

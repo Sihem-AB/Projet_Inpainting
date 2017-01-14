@@ -164,7 +164,7 @@ class Inpainting():
             # We put 1 outside the hole, else : 0
             print ">> Initialisation de C(p)"
             C = np.ones((nl, nc))
-            C[pix1[0]:pix2[0]+1, pix1[1]:pix2[1]+1] = 0
+            C[pix1[0]:pix2[0], pix1[1]:pix2[1]] = 0
 
             D = np.zeros((nl,nc))
 
@@ -262,22 +262,21 @@ class Inpainting():
 
                 for p in delta_gamma_t:
                     # calcul de C[p]
-                    Cp = 0
+                    Cp = 0.0
                     for x in range(p[0] - milieu, p[0] + milieu + 1):
                         for y in range(p[1] - milieu, p[1] + milieu + 1):
                             if mask[(x, y)] == 0:
                                 Cp += C[(x,y)]
-                    Cp /= patch_area
-
+                    Cp /= float(patch_area)
 
                     P[p] = Cp
 
                     ## Calculer D(p) ...
                     N = np.array([grad_maskx[p], grad_masky[p]])
                     # On choisit la valeur du plus grand gradient dans le patch
-                    mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1].astype(bool)
-                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * ~mask_patch)
-                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * ~mask_patch)
+                    mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1]
+                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch))
+                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch))
                     isophote = np.array([gradx_p, grady_p])
                     D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha +0.001
                     P[p] *= D[p]
@@ -330,12 +329,12 @@ class Inpainting():
                 for x in range(xp-milieu, xp+milieu+1):
                     for y in range(yp-milieu, yp+milieu+1):
                         if mask[(x,y)] == 1:
-                            C[x,y] = 0
+                            C[x,y] = 0.0
                             for i in range(x - milieu, x + milieu+1):
                                 for j in range(y - milieu, y + milieu+1):
                                     if mask[i,j] == 0:
                                         C[x,y] += C[i,j]
-                            C[x,y] /= patch_area
+                            C[x,y] /= float(patch_area)
 
         else:
             raise Exception('Patch_size doit etre impair.')
