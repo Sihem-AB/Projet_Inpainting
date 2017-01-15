@@ -42,12 +42,20 @@ class Inpainting():
         #     mask_countour[p] = 0
         #
         # mask_countour = ndimage.gaussian_filter(mask_countour, sigma=1, order=0)
-        #
+        # #
         grad_mask = np.gradient(mask)
         grad_maskx, grad_masky = grad_mask[0], grad_mask[1]
 
         # normalisation du gradient
-        grad_maskx, grad_masky = grad_maskx / np.max(grad_maskx), grad_masky / np.max(grad_masky)
+        # grad_maskx, grad_masky = grad_maskx / np.max(grad_maskx), grad_masky / np.max(grad_masky)
+
+        norm_normal = np.sqrt(grad_maskx * grad_maskx + grad_masky*grad_masky)
+
+        grad_masky /= norm_normal
+        grad_maskx /= norm_normal
+
+        grad_masky = np.nan_to_num(grad_masky)
+        grad_maskx = np.nan_to_num(grad_maskx)
 
         return grad_maskx, grad_masky
 
@@ -62,10 +70,7 @@ class Inpainting():
         masque_laplacien = np.array([[1,1,1], [1,-8,1], [1, 1, 1]])
         after_laplac = convolve2d(mask, masque_laplacien, 'same')
         contour = [tuple(x) for x in list(np.transpose(after_laplac.nonzero()))]
-
         contour = [x for x in contour if mask[x] == 1]
-
-
 
         if not contour: #If the laplacien doesnt detect any contour, it can always remain some piwels who have not been filled yet
             contour = [tuple(x) for x in list(np.transpose(mask.nonzero()))]
@@ -73,27 +78,17 @@ class Inpainting():
         return contour
 
 
-    # @numba.jit
+    """
+        This method find the best patch who minimize the ssd distance with max_patch_center.
+    """
     def find_best_patch(self, image, max_patch_center, milieu, mask,nl,nc,cc):
         xp,yp = max_patch_center
 
-        patch = image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,:].astype(float)
-
-        # y = as_strided(image,
-        #                shape=(image.shape[0] - milieu + 1,
-        #                       image.shape[1] - milieu + 1,cc) +
-        #                      (milieu, milieu),
-        #                strides=image.strides * 2)
-        #
-        # mask_and = ~mask.astype(bool) & ~mask.astype(bool)
-        #
-
-        # Compute the sum of squared differences using broadcasting.
-        # ssd = ((y - patch) ** 2 * mask_and).sum(axis=-1).sum(axis=-1)
+        patch = image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,:].astype(float).copy()
 
         exempl_patch = {}
-        voisinage_x = image.shape[0] / 2
-        voisinage_y = image.shape[1] /2
+        voisinage_x = image.shape[0]
+        voisinage_y = image.shape[1]
 
         print "voisinage_x : ", voisinage_x
 
@@ -106,23 +101,13 @@ class Inpainting():
                     if mask_and.any():  # Si les deux patchs ont au moins un pixel en commun qui n'appartient pas au toroue
                         somme = 0.0
                         for c in range(cc):
-                            diff = image[x - milieu:x + milieu + 1, y - milieu:y + milieu + 1, c].astype(float) \
-                                   - patch[:,:,c]
+                            diff = image[x - milieu:x + milieu + 1, y - milieu:y + milieu + 1, c].astype(float) - patch[:,:,c]
                             somme += np.sum(diff[mask_and] * diff[mask_and])
-                        exempl_patch[(x,y)] = somme / float(np.sum(mask_and))
+                        # exempl_patch[(x,y)] = somme / float(np.sum(mask_and))
+                        exempl_patch[x,y] = somme
 
                         # Trouver l'exemplaire dans la region qui n'est pas le trou, qui minimise la distance entre les deux patchs
         print "Recherche du minimale ..."
-        # exemplar_sorted = sorted(exempl_patch.iteritems(), key=operator.itemgetter(1))
-        # cpt = 0
-        # for i in range(1,len(exemplar_sorted)):
-        #     if exemplar_sorted[i][1] != exemplar_sorted[i-1][1]:
-        #         break
-        #     cpt += 1
-        #
-        # best_exemplar = random.randint(0, cpt)
-        # # print min(exempl_patch.iteritems(), key=operator.itemgetter(1))
-        # return exemplar_sorted[best_exemplar][0]
         return min(exempl_patch.iteritems(), key=operator.itemgetter(1))[0]
 
 
@@ -150,27 +135,20 @@ class Inpainting():
 
             # Initialisation des pixels contours du troue, garder les coordonnees des pixels
             print ">> Initialisation des contours"
-            delta_gamma_t = []
-            for x in range(pix1[0], pix2[0]+1):
-                    delta_gamma_t.append((x,pix1[1]))
-            for x in range(pix1[0], pix2[0]+1):
-                    delta_gamma_t.append((x,pix2[1]))
-            for y in range(pix1[1], pix2[1]+1):
-                    delta_gamma_t.append((pix1[0],y))
-            for y in range(pix1[1], pix2[1]+1):
-                    delta_gamma_t.append((pix2[0],y))
+
 
             # Initialisation de Cp
             # We put 1 outside the hole, else : 0
             print ">> Initialisation de C(p)"
-            C = np.ones((nl, nc))
-            C[pix1[0]:pix2[0], pix1[1]:pix2[1]] = 0
+            C = np.ones((nl, nc), dtype=np.float)
+            C[pix1[0]:pix2[0]+1, pix1[1]:pix2[1]+1] = 0
 
-            D = np.zeros((nl,nc))
+            D = np.zeros((nl,nc), dtype=np.float)
 
             # We start by creating a mask : on met 1 dans le trou t 0 au reste
             mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float)
-            mask[pix1[0]:pix2[0], pix1[1]:pix2[1]] = 1
+            mask[pix1[0]:pix2[0]+1, pix1[1]:pix2[1]+1] = 1
+            delta_gamma_t = self.retourne_contour(mask)
 
             cpt = 0
             plt.ion()
@@ -181,29 +159,18 @@ class Inpainting():
                 print ">> Calcul des P(p)"
                 P = {}
 
-
-                # On calcule maintenant le gradient du masque. Cela va nous permettre d'avoir le vecteur unitaire de la normal
-                # grad_mask = np.gradient(mask)
-                # grad_maskx, grad_masky = grad_mask[0], grad_mask[1]
-
-                # normalisation du gradient
-                # grad_maskx, grad_masky = grad_maskx / np.max(grad_maskx), grad_masky / np.max(grad_masky)
-
                 grad_maskx, grad_masky = self.normal_contour(delta_gamma_t, mask)
 
                 # On calcule le gradient de l'image (cela va servir pour le calcul de D(p))
-                image_smooth = ndimage.gaussian_filter(image, sigma=0.1, order=0)
-                gradx = np.zeros((image.shape[:2]))
-                grady = gradx
+                # image_smooth = ndimage.gaussian_filter(image, sigma=0.1, order=0)
+                gradx = np.zeros((image.shape[:2]), dtype=float)
+                grady = gradx.copy()
                 for channel in range(cc):
-                    grad_isophote = np.gradient(image_smooth[:, :, channel])
+                    grad_isophote = np.gradient(image[:, :, channel])
                     gradx += grad_isophote[0]
                     grady += grad_isophote[1]
-                gradx /= cc
-                grady /= cc
-
-                gradx /= np.max(gradx)
-                grady /= np.max(grady)
+                gradx /= float(cc)
+                grady /= float(cc)
 
                 # We make a rotation of 90 degree of the gradient because othewise the gradient is perpendicular to the contour
                 tmp = gradx
@@ -234,13 +201,13 @@ class Inpainting():
                 plt.show()
 
                 plt.figure(2)
-                plt.imshow(C)
+                plt.imshow(C, cmap='gray')
                 plt.axis("off")
                 plt.title("C")
                 plt.show()
 
                 plt.figure(3)
-                plt.imshow(D)
+                plt.imshow(D, cmap='gray')
                 plt.axis("off")
                 plt.title("D")
                 plt.show()
@@ -257,32 +224,44 @@ class Inpainting():
                 plt.title("grady")
                 plt.show()
 
+                contour = np.zeros((mask.shape))
+                for p in delta_gamma_t:
+                    contour[p] = 1
+
+                plt.figure(6)
+                plt.imshow(contour, cmap='gray')
+                plt.axis("off")
+                plt.title("contour")
+                plt.show()
 
                 plt.pause(0.0000001)
 
                 for p in delta_gamma_t:
                     # calcul de C[p]
-                    Cp = 0.0
+                    C[p] = 0.0
                     for x in range(p[0] - milieu, p[0] + milieu + 1):
                         for y in range(p[1] - milieu, p[1] + milieu + 1):
                             if mask[(x, y)] == 0:
-                                Cp += C[(x,y)]
-                    Cp /= float(patch_area)
+                                C[p] += C[x,y]
+                    C[p] /= float(patch_area)
 
-                    P[p] = Cp
+                    P[p] = copy.deepcopy(C[p])
 
                     ## Calculer D(p) ...
                     N = np.array([grad_maskx[p], grad_masky[p]])
                     # On choisit la valeur du plus grand gradient dans le patch
-                    mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1]
-                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch))
-                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch))
-                    isophote = np.array([gradx_p, grady_p])
-                    D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha +0.001
+                    mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1].copy()
+
+                    gradx_p = gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch)
+                    grady_p = grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch)
+                    norm_grad_p = np.sqrt(gradx_p * gradx_p + grady_p*grady_p)
+                    argm = np.argmax(norm_grad_p)
+
+                    isophote = np.array([gradx_p.flatten()[argm], grady_p.flatten()[argm]])
+                    D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha
                     P[p] *= D[p]
 
                     print "C[p] : ", C[p], " D[p] : ", D[p], "N : ", N
-
 
 
                 # Chercher le patch ayant le plus grand Pp
@@ -299,19 +278,14 @@ class Inpainting():
                 xq,yq = min_exempl_center
                 print "xq, yq :", min_exempl_center, " mask : ", mask[min_exempl_center]
 
-                plt.figure(6)
-                plt.imshow(image[xp - milieu:xp + milieu, yp - milieu:yp + milieu])
-                plt.axis("off")
-                plt.title("meilleur patch a remplir")
-                plt.show()
-
-                plt.figure(7)
-                plt.imshow(image[xq - milieu:xq + milieu, yq - milieu:yq + milieu])
-                plt.axis("off")
-                plt.title("meilleur patch trouvee")
-                plt.show()
 
                 plt.pause(0.001)
+
+                # Update C(p) for all the pixels inside the current patch and inside the hole
+                for x in range(xp-milieu, xp+milieu+1):
+                    for y in range(yp-milieu, yp+milieu+1):
+                        if mask[(x,y)] == 1:
+                            C[x,y] = C[xp,yp]
 
                 # We update the mask
                 for i in range(-milieu, milieu+1):
@@ -324,17 +298,10 @@ class Inpainting():
 
                 # We compute the new contour of the hole
                 delta_gamma_t = self.retourne_contour(mask)
+                # for p in delta_gamma_t:
+                #     mask[p] = 0
 
-                # Update C(p) for all the pixels inside the current patch and inside the hole
-                for x in range(xp-milieu, xp+milieu+1):
-                    for y in range(yp-milieu, yp+milieu+1):
-                        if mask[(x,y)] == 1:
-                            C[x,y] = 0.0
-                            for i in range(x - milieu, x + milieu+1):
-                                for j in range(y - milieu, y + milieu+1):
-                                    if mask[i,j] == 0:
-                                        C[x,y] += C[i,j]
-                            C[x,y] /= float(patch_area)
+
 
         else:
             raise Exception('Patch_size doit etre impair.')

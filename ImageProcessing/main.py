@@ -37,19 +37,22 @@ def onselect(eclick, erelease):
 fig = plt.figure()
 ax = fig.add_subplot(111)
 
+rep = "Images/"
+
 # filename="plage.jpg"
 # filename = "licorne.png"
 # filename = "ile.jpg"
 # filename = "paysage_homme.jpg"
-filename = "chaise.png"
+# filename = "chaise.png"
 # filename = "orange.jpg"
 # filename = "moto.jpg"
-# filename = "livre.jpg"
-i = mpimg.imread(filename)
+filename = "livre.jpg"
+# filename = "renovation.png"
+i = mpimg.imread(rep + filename)
 
 arr = np.asarray(i)
 plt_image=plt.imshow(arr)
-plt.title("Select the part you want to remove, and close the windows when you have finish")
+plt.title("Select the part you want to remove, \n and close the windows when you have finished")
 
 rs=widgets.RectangleSelector(
     ax, onselect, drawtype='box',
@@ -70,8 +73,7 @@ y2 = cadrant[-2]
 print x1, " ", y1, " ", x2, " ", y2
 
 for channel in range(i.shape[2]):
-    i[x1:x2, y1:y2, channel] = 0.5
-    i[x1:x2, y1:y2, channel] = 0.5
+    i[x1:x2+1, y1:y2+1, channel] = 1
 
 plt.imshow(i)
 plt.axis('off')
@@ -79,13 +81,21 @@ plt.draw()
 
 # im = color.rgb2grey(i[:,:,:3])[:,:].reshape((i.shape[0], i.shape[1], 1))
 
+patch_size = 3
 # im = i
 im = color.rgb2lab(i[:,:,:3])
-inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=15, alpha = np.max(i))
+inpainting = Inpainting(image = im, pix1 = [x1, y1], pix2 = [x2, y2], patch_size=patch_size, alpha = np.max(im))
 new_image = inpainting.region_filling_algorithm()
 
 print "FIN!!!"
+
+plt.close()
+plt.figure()
+plt.imshow(i)
+plt.title("Image avant algorithme")
+plt.figure()
 plt.imshow(color.lab2rgb(new_image))
+plt.title("Image apres algorithme : " + str(patch_size))
 plt.axis('off')
 plt.show()
 plt.pause(1000)
