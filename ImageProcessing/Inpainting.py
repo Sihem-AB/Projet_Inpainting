@@ -20,12 +20,13 @@ pyximport.install()
 # from fastSSD import *
 
 class Inpainting():
-    def __init__(self, image, pix1, pix2,patch_size, alpha):
+    def __init__(self, image, pix1, pix2,patch_size, alpha, gaussian_blur=0.0):
         self.image = image
         self.pix1 = pix1
         self.pix2 = pix2
         self.patch_size = patch_size
         self.alpha = alpha
+        self.gaussian_blur = gaussian_blur
 
     """
         Input :
@@ -85,6 +86,7 @@ class Inpainting():
         xp,yp = max_patch_center
 
         patch = image[xp - milieu:xp + milieu + 1, yp - milieu:yp + milieu + 1,:].astype(float).copy()
+        mask_patch = mask[xp-milieu:xp+milieu+1,yp-milieu:yp+milieu+1].astype(bool)
 
         exempl_patch = {}
         voisinage_x = image.shape[0]
@@ -96,8 +98,9 @@ class Inpainting():
         ymin, ymax = max(yp - voisinage_y, milieu), min(yp + voisinage_y, nc - milieu)
         for x in range(xmin, xmax):
             for y in range(ymin, ymax):
-                if mask[(x, y)] == 0:  # n'appartient pas au troue
-                    mask_and = ~mask[x-milieu:x+milieu+1,y-milieu:y+milieu+1].astype(bool) & ~mask[xp-milieu:xp+milieu+1,yp-milieu:yp+milieu+1].astype(bool)
+                mask_possible_best = ~mask[x-milieu:x+milieu+1,y-milieu:y+milieu+1].astype(bool)
+                if mask_possible_best.all():  # n'appartient pas au troue
+                    mask_and = mask_possible_best & ~mask_patch
                     if mask_and.any():  # Si les deux patchs ont au moins un pixel en commun qui n'appartient pas au toroue
                         somme = 0.0
                         for c in range(cc):
@@ -162,7 +165,10 @@ class Inpainting():
                 grad_maskx, grad_masky = self.normal_contour(delta_gamma_t, mask)
 
                 # On calcule le gradient de l'image (cela va servir pour le calcul de D(p))
-                # image_smooth = ndimage.gaussian_filter(image, sigma=0.1, order=0)
+                image_smooth = image.copy()
+                if self.gaussian_blur != 0.0:
+                    image_smooth = ndimage.gaussian_filter(image, sigma=self.gaussian_blur, order=0)
+
                 gradx = np.zeros((image.shape[:2]), dtype=float)
                 grady = gradx.copy()
                 for channel in range(cc):
@@ -252,13 +258,16 @@ class Inpainting():
                     # On choisit la valeur du plus grand gradient dans le patch
                     mask_patch = mask[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1].copy()
 
-                    gradx_p = gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch)
-                    grady_p = grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1] * (1-mask_patch)
-                    norm_grad_p = np.sqrt(gradx_p * gradx_p + grady_p*grady_p)
-                    argm = np.argmax(norm_grad_p)
+                    gradx_p = np.max(gradx[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1])
+                    grady_p = np.max(grady[p[0]-milieu:p[0]+milieu+1, p[1]-milieu:p[1]+milieu+1])
 
-                    isophote = np.array([gradx_p.flatten()[argm], grady_p.flatten()[argm]])
-                    D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha
+
+                    # norm_grad_p = np.sqrt(gradx_p * gradx_p + grady_p*grady_p)
+                    # argm = np.argmax(norm_grad_p * (1-mask_patch))
+
+                    # isophote = np.array([gradx_p.flatten()[argm], grady_p.flatten()[argm]])
+                    isophote = np.array([gradx_p, grady_p])
+                    D[p] = abs(N[0]*isophote[0] + N[1]*isophote[1])/alpha + 0.001
                     P[p] *= D[p]
 
                     print "C[p] : ", C[p], " D[p] : ", D[p], "N : ", N
