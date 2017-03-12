@@ -1,23 +1,36 @@
 # -*- coding: utf-8 -*-
-import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.widgets as widgets
-from scipy import misc
-from scipy.signal import convolve2d
-import operator
 import matplotlib.image as mpimg
-from matplotlib import colors
-from skimage import io, color
-from scipy.interpolate import *
-import numba
 from Inpainting import *
 
+# -------------------------------PARAMETRE UTILISEES  ----------------------------------------
+patch_size = 9
+gaussian_blur = 0.1
 
+rep = "Images/"
+# filename = "Kanizsa_triangle.jpg"
+# filename="plage.jpg"
+# filename = "licorne.png"
+# filename = "ile.jpg"
+# filename = "paysage_homme.jpg"
+# filename = "chaise.png"
+# filename = "orange.jpg"
+# filename = "moto.jpg"
+# filename = "livre.jpg"
+# filename = "renovation.png"
+# filename = "texture.gif"
+# filename = "statueLiberte.jpg"
+filename = "parachutiste.jpg"
+# filename = "triangles.jpg"
+# filename = "triangles2.jpg"
+i = mpimg.imread(rep + filename)
+
+# ------------------------------FIN PARAMETRES -------------------------------------------------------------------------
+
+#  --------------------------GESTION DE LA SELECTION pour le troue -----------------------------------------------------
 cadrant = []
 
 def onselect(eclick, erelease):
-    #print "eclick: ", eclick.xdata, " ___ ", eclick.ydata  #x1, y1
-    #print "erelease: ", erelease.xdata, " ___ ", erelease.ydata #x2, y2
 
     cadrant.append(int(eclick.xdata))
     cadrant.append(int(eclick.ydata))
@@ -32,24 +45,8 @@ def onselect(eclick, erelease):
     # ax.set_xlim(eclick.xdata,erelease.xdata)
     fig.canvas.draw()
 
-
-
 fig = plt.figure()
 ax = fig.add_subplot(111)
-
-rep = "Images/"
-
-# filename="plage.jpg"
-# filename = "licorne.png"
-# filename = "ile.jpg"
-# filename = "paysage_homme.jpg"
-# filename = "chaise.png"
-filename = "orange.jpg"
-# filename = "moto.jpg"
-# filename = "livre.jpg"
-# filename = "renovation.png"
-# filename = "texture.gif"
-i = mpimg.imread(rep + filename)
 
 arr = np.asarray(i)
 plt_image=plt.imshow(arr)
@@ -58,50 +55,50 @@ plt.title("Select the part you want to remove, \n and close the windows when you
 rs=widgets.RectangleSelector(
     ax, onselect, drawtype='box',
     rectprops = dict(facecolor='red', edgecolor = 'black', alpha=0.5, fill=True))
-
 plt.show()
 
-# plt.imshow(i)
-# plt.axis('off')
-# plt.show()
 
-# Definir le trou initiale (delta omega 0) sense etre selectionne par le user
+# Definir le trou initiale (delta omega 0) après que l'utilisateur ait selectionné le rectange
 x1 = cadrant[-3]
 y1 = cadrant[-4]
 x2 = cadrant[-1]
 y2 = cadrant[-2]
 
-print x1, " ", y1, " ", x2, " ", y2
+milieu = patch_size / 2
+x1, x2 = max(x1 - milieu, milieu), min(x2+milieu+1, i.shape[0] - milieu-1)
+y1, y2 = max(y1 - milieu, milieu), min(y2+milieu+1, i.shape[1] - milieu-1)
 
+# On met le troue dans l'image
 for channel in range(i.shape[2]):
     i[x1:x2+1, y1:y2+1, channel] = 1
+
+
+# ----------------------------FIN DE LA GESTION DE LA SELECTION-------------------------------------------------------
+
 
 plt.imshow(i)
 plt.axis('off')
 plt.draw()
 
-# im = color.rgb2grey(i[:,:,:3])[:,:].reshape((i.shape[0], i.shape[1], 1))
-
-patch_size = 11
-# im = i
 im = color.rgb2lab(i[:,:,:3])
 inpainting = Inpainting(image = im,
                         pix1 = [x1, y1],
                         pix2 = [x2, y2],
                         patch_size=patch_size,
                         alpha = np.max(im),
-                        gaussian_blur=1.5)
+                        gaussian_blur=gaussian_blur)
 new_image = inpainting.region_filling_algorithm()
 
 print "FIN!!!"
 
 plt.figure()
-plt.imshow(i)
+plt.imshow(i[:,:,:3])
+plt.axis('off')
 plt.title("Image avant algorithme")
 plt.figure()
 plt.imshow(color.lab2rgb(new_image))
 plt.title("Image apres algorithme : " + str(patch_size))
 plt.axis('off')
 plt.show()
-plt.pause(1000)
+plt.pause(100000000)
 raw_input("Press Enter to continue...")
